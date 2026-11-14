@@ -72,6 +72,8 @@ jobs:
         run: |
           tools/bazel run \
             --lto="$LTO" \
+            --verbose_failures \
+            --sandbox_debug \
             "$BAZEL_TARGET" \
             -- --destdir="$GITHUB_WORKSPACE/dist"
 
