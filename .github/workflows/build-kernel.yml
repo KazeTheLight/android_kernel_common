@@ -3,8 +3,13 @@ name: Build Kernel (Bazel/Kleaf)
 on:
   workflow_dispatch:
     inputs:
+      source:
+        description: "Sumber common: aosp (murni AOSP) / overlay (AOSP + timpa dengan isi repo ini) / replace (ganti total common dengan repo ini)"
+        type: choice
+        options: [aosp, overlay, replace]
+        default: aosp
       manifest_branch:
-        description: "Branch manifest AOSP kernel (harus sesuai versi kernel)"
+        description: "Branch manifest AOSP kernel"
         default: "common-android16-6.12-2025-09"
       target:
         description: "Target Bazel"
@@ -14,6 +19,7 @@ on:
         default: "thin"
 
 env:
+  SOURCE: ${{ inputs.source || 'aosp' }}
   MANIFEST_BRANCH: ${{ inputs.manifest_branch || 'common-android16-6.12-2025-09' }}
   BAZEL_TARGET: ${{ inputs.target || '//common:kernel_aarch64_dist' }}
   LTO: ${{ inputs.lto || 'thin' }}
@@ -34,7 +40,8 @@ jobs:
           large-packages: false
           swap-storage: true
 
-      - name: Checkout fork ini (source kernel)
+      - name: Checkout repo ini (hanya untuk overlay/replace)
+        if: ${{ (inputs.source || 'aosp') != 'aosp' }}
         uses: actions/checkout@v4
         with:
           path: common-src
@@ -52,7 +59,7 @@ jobs:
           chmod +x ~/bin/repo
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      - name: Sync workspace Kleaf (build/kernel, toolchain, dll)
+      - name: Sync workspace Kleaf (common murni dari AOSP)
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
@@ -62,10 +69,17 @@ jobs:
             -b "$MANIFEST_BRANCH" --depth=1 --no-tags
           repo sync -c -j8 --no-tags --no-clone-bundle --fail-fast
 
-      - name: Ganti common bawaan AOSP dengan fork ini
+      - name: Timpa isi common dengan repo ini
+        if: ${{ (inputs.source || 'aosp') != 'aosp' }}
         run: |
-          rm -rf kernel/common
-          mv common-src kernel/common
+          if [ "$SOURCE" = "overlay" ]; then
+            # file di repo ini menimpa file common AOSP, sisanya tetap murni AOSP
+            rsync -a --exclude='.git' --exclude='.github' common-src/ kernel/common/
+          else
+            # replace: seluruh common diganti repo ini
+            rm -rf kernel/common
+            mv common-src kernel/common
+          fi
 
       - name: Build dengan Bazel
         working-directory: kernel
@@ -73,7 +87,6 @@ jobs:
           tools/bazel run \
             --lto="$LTO" \
             --verbose_failures \
-            --sandbox_debug \
             "$BAZEL_TARGET" \
             -- --destdir="$GITHUB_WORKSPACE/dist"
 
